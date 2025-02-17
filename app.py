@@ -63,6 +63,8 @@ def chat():
     # 迭代器实现流式响应
     def generate():
         errorStr = ""
+        last_reasoning_content = None  # 记录最后一个 reasoning_content 的内容
+        reasoning_ended = False  # 标记 reasoning_content 是否已结束
         for chunk in resp.iter_lines():
             if chunk:
                 streamStr = chunk.decode("utf-8").replace("data: ", "")
@@ -80,17 +82,28 @@ def chat():
 
                 if delData["finish_reason"] is not None:
                     break
-                else:
-                    # 返回 deepseek R1 推理过程
-                    if "reasoning_content" in delData["delta"] and delData["delta"]["reasoning_content"] is not None:
-                        respStr = delData["delta"]["reasoning_content"]
-                    # 返回正式结果
-                    elif "content" in delData["delta"] and delData["delta"]["content"] is not None:
-                        respStr = delData["delta"]["content"]
-                        # print(respStr)
-                    if respStr is not None:
-                        yield respStr
 
+                delta = delData["delta"]
+                respStr = None
+
+                # 兼容deepseek R1推理过程，处理 reasoning_content
+                if delta.get("reasoning_content") is not None:
+                    last_reasoning_content = delta["reasoning_content"]
+                    respStr = last_reasoning_content
+                    reasoning_ended = False  # 重置结束标记
+
+                # 处理 content
+                elif delta.get("content") is not None:
+                    # 如果之前有未结束的 reasoning_content，先补换行
+                    if last_reasoning_content is not None and not reasoning_ended:
+                        respStr = "\n\n" + delta["content"]
+                        reasoning_ended = True  # 标记已处理换行
+                    else:
+                        respStr = delta["content"]
+
+                if respStr is not None:
+                    yield respStr
+                    
         # 如果出现错误，此时错误信息迭代器已处理完，app_context已经出栈，要返回错误信息，需要将app_context手动入栈
         if errorStr != "":
             with app.app_context():
